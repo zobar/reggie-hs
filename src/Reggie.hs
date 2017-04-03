@@ -1,11 +1,12 @@
-module Reggie (filterMap, lit, parser, pred, read, rep) where
+module Reggie (lit, Parser, parser, pred, read, rep, transition) where
 
-import Prelude       hiding (map, pred, read)
-import Reggie.Parser hiding (filterMap, rep)
+import Control.Applicative
+import Prelude hiding (pred, read)
+import Reggie.Parser (Parser, read)
 import Reggie.Rule
 
-lit :: Eq a => a -> Rule a a
+lit :: (Eq a, Alternative m) => a -> Rule a m a
 lit a = pred (a ==)
 
-pred :: (a -> Bool) -> Rule a a
-pred p = filterMap (\a -> if (p a) then Just a else Nothing)
+pred :: Alternative m => (a -> Bool) -> Rule a m a
+pred p = transition (\a -> if (p a) then pure a else empty)

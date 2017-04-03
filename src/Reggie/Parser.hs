@@ -1,50 +1,49 @@
 module Reggie.Parser where
 
-import Prelude hiding (read)
 import Control.Applicative
 import Data.IntMap.Lazy (IntMap)
 import qualified Data.IntMap.Lazy as IntMap
-import Data.IntSet (IntSet)
-import qualified Data.IntSet as IntSet
 
-data Parser i o = Parser (Maybe o) (IntMap (i -> Parser i o))
+data Parser i m o = Parser (m o) (IntMap (i -> Parser i m o))
 
-instance Show o =>
-         Show (Parser i o) where
+instance Show (m o) =>
+         Show (Parser i m o) where
   show (Parser a t) = "Accept " ++ (show a) ++
                       " with transitions to " ++ (show (IntMap.keys t))
 
-instance Monoid (Parser i o) where
-    mempty = empty
-    mappend = (<|>)
-
-instance Functor (Parser i) where
+instance Functor m =>
+         Functor (Parser i m) where
     fmap f (Parser aa at) = Parser (fmap f aa) (fmap (\t i -> fmap f (t i)) at)
 
-instance Applicative (Parser i) where
+instance (Applicative m, Foldable m) =>
+         Applicative (Parser i m) where
     pure o = Parser (pure o) mempty
-    (Parser fa ft) <*> as@(Parser aa at) =
+    Parser fa ft <*> as@(Parser aa at) =
         Parser (fa <*> aa)
                (foldr (\f bs -> mappend bs (fmap (\t i -> fmap f (t i)) at))
                       (fmap (\t i -> (t i) <*> as) ft)
                       fa)
 
-instance Alternative (Parser i) where
+instance (Alternative m, Foldable m) =>
+         Alternative (Parser i m) where
     empty = Parser empty mempty
     (Parser aa at) <|> (Parser ba bt) = Parser (aa <|> ba) (mappend at bt)
 
-instance Monad (Parser i) where
-    (Parser aa at) >>= f =
-        foldr (\a as -> mappend as (f a))
-              (Parser empty (fmap (\t i -> (t i) >>= f) at))
-              aa
+instance (Alternative m, Foldable m) =>
+         Monad (Parser i m) where
+    (Parser aa at) >>= f = foldr (\a as -> as <|> (f a))
+                                 (Parser empty (fmap (\t i -> (t i) >>= f) at))
+                                 aa
 
-filterMap :: Int -> (i -> Maybe o) -> Parser i o
-filterMap a f = Parser empty (IntMap.singleton a (\i -> foldMap pure (f i)))
+transition :: Alternative m =>
+              Int -> (i -> m o) -> Parser i m o
+transition a f = Parser empty (IntMap.singleton a (\i -> Parser (f i) mempty))
 
-read :: Parser i o -> i -> Parser i o
-read (Parser _ ts) i = foldMap (\t -> t i) ts
+read :: (Alternative m, Foldable m) =>
+        Parser i m o -> i -> Parser i m o
+read (Parser _ ts) i = foldr (\f acc -> (f i) <|> acc) empty ts
 
-rep :: (a -> b -> b) -> b -> Parser i a -> Parser i b
+rep :: (Alternative m, Foldable m) =>
+       (a -> b -> b) -> b -> Parser i m a -> Parser i m b
 rep f acc a@(Parser _ at) =
-    Parser (Just acc) (fmap (\t i -> (t i) >>= (\o -> rep f (f o acc) a)) at)
+    Parser (pure acc) (fmap (\t i -> (t i) >>= (\o -> rep f (f o acc) a)) at)
